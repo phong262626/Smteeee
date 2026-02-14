@@ -2,109 +2,96 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMTE iPad</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>SMTE Teleprompter</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Sarabun', sans-serif; touch-action: manipulation; }
-        .teleprompter-text { text-shadow: 0 2px 4px rgba(0,0,0,0.8); line-height: 1.3; }
-        
-        /* ปุ่มเลือกโหมด (ใหญ่ขึ้นสำหรับ iPad) */
-        .tone-btn {
-            background-color: #1f2937; color: #9ca3af; border: 1px solid #374151;
-            transition: all 0.2s;
-        }
-        .tone-btn.active {
-            background-color: #2563eb; color: white; border-color: #60a5fa;
-            transform: scale(1.05); box-shadow: 0 0 10px rgba(37, 99, 235, 0.5);
+        body { 
+            font-family: 'Sarabun', sans-serif; 
+            -webkit-tap-highlight-color: transparent;
+            overscroll-behavior: none;
         }
         
-        /* Animation ไมค์ */
-        .mic-active {
-            background-color: #dc2626 !important; border-color: #ef4444 !important;
-            animation: pulse-red 1.5s infinite;
-        }
+        .listening-pulse { animation: pulse-red 1.5s infinite; }
         @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
-            70% { box-shadow: 0 0 0 15px rgba(220, 38, 38, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        .teleprompter-text {
+            text-shadow: 0 4px 8px rgba(0,0,0,0.8);
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        
+        /* ปรับแต่ง Scrollbar สำหรับ Admin */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
     </style>
 </head>
-<body class="bg-black text-white h-screen flex flex-col overflow-hidden">
+<body class="bg-black text-white h-screen flex flex-col overflow-hidden select-none">
 
-    <div id="main-ui" class="flex-1 flex flex-col relative z-10">
+    <div id="fake-error-screen" class="hidden fixed inset-0 bg-[#0078d7] z-[100] flex flex-col items-center justify-center text-white font-mono p-10 cursor-none select-none">
+        <div class="text-[80px] mb-4">:(</div>
+        <h2 class="text-3xl mb-8 text-center">Your Device ran into a problem.</h2>
+        <div class="text-xl opacity-80">Stop code: CRITICAL_PROCESS_DIED</div>
+    </div>
+
+    <div id="admin-panel" class="hidden absolute inset-0 bg-black/95 z-50 p-6 overflow-y-auto safe-area-inset-top">
+        <div class="flex justify-between items-center mb-8 border-b border-gray-700 pb-4 mt-8">
+            <h2 class="text-2xl font-bold text-red-500">CONTROL ROOM</h2>
+            <button onclick="document.getElementById('admin-panel').classList.add('hidden')" class="text-gray-400 border border-gray-600 px-4 py-2 rounded">Close</button>
+        </div>
+        <div id="user-list-container" class="grid grid-cols-1 gap-4"></div>
+    </div>
+
+    <div class="flex-1 flex flex-col relative z-10">
         
-        <main class="flex-1 flex flex-col justify-start pt-8 px-4 text-center relative">
-            
-            <div class="flex justify-center gap-2 mb-4 flex-wrap">
-                <button onclick="setTone('formal')" id="btn-formal" class="tone-btn px-4 py-3 rounded-xl text-sm font-bold">ทางการ</button>
-                <button onclick="setTone('semi')" id="btn-semi" class="tone-btn px-4 py-3 rounded-xl text-sm font-bold active">กึ่งทางการ</button>
-                <button onclick="setTone('simple')" id="btn-simple" class="tone-btn px-4 py-3 rounded-xl text-sm font-bold">ง่ายๆ</button>
+        <header class="absolute top-4 left-6 right-6 flex justify-between z-20">
+            <div class="text-xs text-gray-500 flex gap-2 items-center bg-black/30 px-3 py-1 rounded-full backdrop-blur-sm">
+                <span id="status-dot" class="w-2 h-2 rounded-full bg-green-500"></span>
+                <span id="model-status">System Ready</span>
             </div>
+            <button onclick="unlockAdmin()" class="opacity-0 w-10 h-10">.</button> 
+        </header>
 
-            <div class="text-[10px] text-gray-500 mb-2">System Ready (Gemini Pro)</div>
-
-            <div id="ai-response-box" class="flex-1 flex flex-col items-center overflow-y-auto pb-24">
-                <div class="text-gray-700 mt-20 text-2xl font-light opacity-30 select-none">
-                    (แตะไมค์ แล้วพูด...)
+        <main class="flex-1 flex flex-col justify-center pt-10 px-6 md:px-20 text-center relative overflow-y-auto no-scrollbar">
+            <div id="ai-response-box" class="flex flex-col items-center justify-center min-h-[50vh]">
+                <div class="text-gray-600 text-2xl font-light opacity-50 italic">
+                    (แตะไมโครโฟนเพื่อเริ่มพูด)
                 </div>
             </div>
         </main>
 
-        <footer class="p-6 bg-gray-950 border-t border-gray-900 absolute bottom-0 w-full pb-10">
-            <div id="transcript-text" class="text-xs text-gray-400 text-center mb-4 h-5 truncate italic">...</div>
-            
-            <div class="flex items-center justify-center gap-6">
-                <button id="mic-btn" onclick="toggleMic()" class="w-20 h-20 rounded-full bg-gray-800 border-2 border-gray-600 text-white flex items-center justify-center transition-all active:scale-95 shadow-lg">
-                    <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+        <footer class="p-6 pb-10 bg-gradient-to-t from-black via-black/90 to-transparent">
+            <div id="transcript-text" class="text-sm text-blue-400 text-center mb-4 h-6 truncate font-mono">...</div>
+
+            <div class="flex items-center justify-center gap-8 max-w-md mx-auto">
+                <button id="mic-btn" onclick="toggleMic()" class="w-20 h-20 rounded-full bg-gray-800 border-2 border-gray-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90 hover:bg-gray-700">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
                 </button>
 
-                <button onclick="sendToAI()" class="w-24 h-24 rounded-3xl bg-blue-600 text-white shadow-lg shadow-blue-900/30 flex items-center justify-center transition-all active:scale-95 hover:bg-blue-500 font-bold text-3xl">
+                <button onclick="sendToAI()" class="w-20 h-20 rounded-full bg-blue-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90 hover:bg-blue-500 font-bold text-xl">
                     GO
                 </button>
             </div>
         </footer>
     </div>
 
-    <div id="admin-panel" class="hidden absolute inset-0 bg-gray-900 z-50 p-6 overflow-y-auto">
-        <header class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
-            <h2 class="text-2xl font-bold text-red-500">CONTROL ROOM</h2>
-            <button onclick="window.location.reload()" class="text-gray-400 border border-gray-600 px-4 py-2 rounded text-xs">Exit</button>
-        </header>
-        <div id="user-list-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-    </div>
-
-    <div id="fake-error-screen" class="hidden fixed inset-0 bg-[#0078d7] z-[100] flex flex-col items-center justify-center text-white font-mono p-10 cursor-none select-none">
-        <div class="text-[80px] mb-4">:(</div>
-        <h2 class="text-3xl mb-4">Error</h2>
-    </div>
-
     <script>
-        // --- 1. SETTINGS ---
-        const GEMINI_API_KEY = "AIzaSyB4TGfiYiZHIdgTeGwyvuDzm5oIHA0wthY";
-        const MODEL_NAME = "gemini-pro"; 
+        // --- 1. API CONFIG ---
+        // ใส่ Key ที่คุณให้มาแล้ว
+        const GEMINI_API_KEY = "AIzaSyCYhxF5-FQRrwJQ5iSeokdG6BMtsyzHULE";
+        const SELECTED_MODEL = "gemini-1.5-flash"; 
 
-        let currentTone = 'semi';
-        let recognition;
-        let isRecording = false;
-
-        const tones = {
-            'formal': 'ทางการ วิชาการ สุภาพมาก',
-            'semi': 'กึ่งทางการ สุภาพแต่มั่นใจ (แนะนำ)',
-            'simple': 'ภาษาพูด ง่ายๆ สั้นๆ กระชับ',
-        };
-
-        function setTone(mode) {
-            currentTone = mode;
-            document.querySelectorAll('.tone-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('btn-' + mode).classList.add('active');
-        }
-
-        // --- 2. FIREBASE ---
+        // --- 2. FIREBASE CONFIG ---
         const firebaseConfig = {
             apiKey: "AIzaSyDHEHqYCU1dAJLOFPC7TLOa2KucoZG4bxA",
             authDomain: "wolf-game-fdb66.firebaseapp.com",
@@ -112,79 +99,110 @@
             projectId: "wolf-game-fdb66",
             appId: "1:10904255215:web:7a50312897b1e97c77f91a"
         };
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        try {
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        } catch(e) { console.error("Firebase init error", e); }
         const db = firebase.database();
 
-        // --- 3. IDENTITY ---
-        const myID = 'u_' + Math.random().toString(36).substr(2, 4);
+        // --- 3. USER IDENTITY ---
         const ua = navigator.userAgent;
-        let dName = ua.includes("iPad") ? "iPad" : ua.includes("iPhone") ? "iPhone" : "Mobile";
+        const isIPad = ua.includes("iPad") || (ua.includes("Macintosh") && "ontouchend" in document);
+        const myID = (isIPad ? 'iPad_' : 'u_') + Math.random().toString(36).substr(2, 4);
         
         const userRef = db.ref('smte_users/' + myID);
-        userRef.set({ device: dName, agent: ua, status: 'normal', lastActive: Date.now() });
+        userRef.set({ 
+            device: isIPad ? "iPad" : "Device", 
+            agent: ua, 
+            status: 'normal', 
+            lastActive: Date.now() 
+        });
         userRef.onDisconnect().remove();
 
         userRef.child('status').on('value', (snap) => {
-            if ((snap.val() || 'normal') === 'troll') {
+            const status = snap.val() || 'normal';
+            if (status === 'troll') {
                 document.getElementById('fake-error-screen').classList.remove('hidden');
             } else {
                 document.getElementById('fake-error-screen').classList.add('hidden');
             }
         });
 
-        // --- 4. MIC (iPad Compatible) ---
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        // --- 4. SPEECH RECOGNITION (iPad Compatible) ---
+        let recognition;
+        let isListening = false;
+        
+        // ใช้ webkitSpeechRecognition สำหรับ iOS/Safari
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        if (SpeechRecognition) {
             recognition = new SpeechRecognition();
             recognition.lang = 'th-TH';
-            recognition.continuous = false;
+            recognition.continuous = false; // iOS ทำงานได้ดีกว่าถ้าไม่เปิด continuous
             recognition.interimResults = true;
 
             recognition.onstart = () => {
-                isRecording = true;
-                document.getElementById('mic-btn').classList.add('mic-active');
+                isListening = true;
+                const btn = document.getElementById('mic-btn');
+                btn.classList.add('bg-red-600', 'border-red-500', 'listening-pulse');
+                btn.classList.remove('bg-gray-800', 'border-gray-600');
                 document.getElementById('transcript-text').innerText = "กำลังฟัง...";
             };
+
             recognition.onend = () => {
-                isRecording = false;
-                document.getElementById('mic-btn').classList.remove('mic-active');
+                isListening = false;
+                const btn = document.getElementById('mic-btn');
+                btn.classList.remove('bg-red-600', 'border-red-500', 'listening-pulse');
+                btn.classList.add('bg-gray-800', 'border-gray-600');
             };
+
             recognition.onresult = (event) => {
                 const transcript = Array.from(event.results).map(r => r[0].transcript).join('');
                 document.getElementById('transcript-text').innerText = transcript;
             };
+            
+            recognition.onerror = (event) => {
+                console.error("Speech Error:", event.error);
+                if(event.error === 'not-allowed') {
+                    alert("กรุณากด 'อนุญาต' (Allow) เพื่อให้เว็บใช้ไมโครโฟน");
+                }
+            };
         } else {
-            alert("⚠️ iPad กรุณาใช้ Safari เท่านั้น (Chrome อาจบล็อกไมค์)");
+            alert("อุปกรณ์นี้ไม่รองรับการพิมพ์ด้วยเสียง (ลองใช้ Chrome หรือ Safari เวอร์ชั่นล่าสุด)");
         }
 
         function toggleMic() {
-            if (isRecording) {
+            if (!recognition) return;
+            if (isListening) {
                 recognition.stop();
             } else {
-                try { recognition.start(); } catch (e) { alert("Mic Error: กด Allow หรือยัง?"); }
+                recognition.start();
             }
         }
 
-        // --- 5. AI LOGIC ---
+        // --- 5. AI GENERATION ---
         async function sendToAI() {
             const text = document.getElementById('transcript-text').innerText;
             const aiBox = document.getElementById('ai-response-box');
 
-            if (!text || text === '...' || text.length < 2) {
-                alert("พูดคำถามก่อนครับ!");
+            if (!text || text.length < 2 || text.includes('กำลังฟัง') || text.includes('...')) {
                 return;
             }
 
-            aiBox.innerHTML = `<div class="mt-20 text-4xl font-bold text-yellow-500 animate-pulse tracking-widest">...กำลังคิด...</div>`;
+            // UI Loading
+            aiBox.innerHTML = `<div class="mt-10 text-4xl font-bold text-yellow-400 animate-pulse text-center">...กำลังคิดคำตอบ...</div>`;
 
             try {
+                // Prompt Engineering
                 const prompt = `
-                Role: คนเขียนบทสัมภาษณ์ SMTE
-                Tone: ${tones[currentTone]}
-                Question: "${text}"
-                Task: เขียนคำตอบ 1 ย่อหน้าสั้นๆ (ไม่เกิน 2 ประโยค) อ่านตามได้เลย`;
+                Role: คุณคือโค้ชสัมภาษณ์งานอัจฉริยะ
+                Task: เขียนบทพูดสั้นๆ (Script) ให้ฉันพูดตอบคำถามนี้: "${text}"
+                Guidelines:
+                1. ตอบสั้น กระชับ (ไม่เกิน 3 ประโยค)
+                2. ภาษาพูดที่เป็นธรรมชาติ มั่นใจ สุภาพ
+                3. ไม่ต้องเกริ่นนำ ไม่ต้องสรุป เอาเนื้อหาที่จะพูดเลย
+                4. ถ้าเป็นคำถามกวนๆ ให้ตอบกลับแบบฉลาดและตลกนิดๆ`;
 
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${SELECTED_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
                 
                 const response = await fetch(url, {
                     method: 'POST',
@@ -192,15 +210,67 @@
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
 
-                if (!response.ok) throw new Error("API Error");
+                if (!response.ok) {
+                    throw new Error(`Server Error: ${response.status}`);
+                }
 
                 const data = await response.json();
+                
+                if(data.error) throw new Error(data.error.message);
+                
                 const answer = data.candidates[0].content.parts[0].text;
-                aiBox.innerHTML = `<div class="text-4xl font-bold text-white leading-snug teleprompter-text animate-fade-in mt-10 px-4">${answer}</div>`;
+                
+                // Display Result
+                aiBox.innerHTML = `<div class="text-4xl md:text-5xl font-bold text-white leading-snug teleprompter-text animate-fade-in mt-6 px-4">${answer}</div>`;
 
             } catch (err) {
-                aiBox.innerHTML = `<div class="text-lg text-red-400 mt-20">Error: เช็คเน็ต/Key</div>`;
+                console.error(err);
+                aiBox.innerHTML = `
+                    <div class="mt-10 text-red-400 text-xl font-mono text-center">
+                        Error: ${err.message}<br>
+                        <span class="text-sm text-gray-400">(ลองกด GO ใหม่ หรือรีเฟรชหน้าจอ)</span>
+                    </div>`;
             }
+        }
+
+        // --- 6. ADMIN ---
+        function unlockAdmin() {
+            const pass = prompt("Admin Password:");
+            if (pass === "1234") { // รหัสผ่านง่ายๆ เปลี่ยนได้
+                document.getElementById('admin-panel').classList.remove('hidden');
+                loadUsers();
+            }
+        }
+
+        function loadUsers() {
+            const container = document.getElementById('user-list-container');
+            db.ref('smte_users').on('value', (snap) => {
+                container.innerHTML = '';
+                snap.forEach((child) => {
+                    const u = child.val();
+                    const uid = child.key;
+                    const isMe = uid === myID;
+                    
+                    const div = document.createElement('div');
+                    div.className = `p-4 rounded border ${u.status === 'troll' ? 'bg-red-900 border-red-500' : 'bg-gray-800 border-gray-700'} flex justify-between items-center`;
+                    div.innerHTML = `
+                        <div>
+                            <div class="font-bold ${isMe ? 'text-green-400' : 'text-white'}">${u.device} ${isMe ? '(ME)' : ''}</div>
+                            <div class="text-xs text-gray-400">${uid}</div>
+                        </div>
+                        <button onclick="toggleTroll('${uid}', '${u.status}')" class="px-3 py-1 rounded ${u.status === 'troll' ? 'bg-green-600' : 'bg-red-600'} text-white text-sm">
+                            ${u.status === 'troll' ? 'Restore' : 'Kill'}
+                        </button>
+                    `;
+                    container.appendChild(div);
+                });
+            });
+        }
+
+        function toggleTroll(uid, currentStatus) {
+            db.ref('smte_users/' + uid).update({
+                status: currentStatus === 'troll' ? 'normal' : 'troll'
+            });
         }
     </script>
 </body>
