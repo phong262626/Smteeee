@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>SMTE Teleprompter (New Key)</title>
+    <title>SMTE Teleprompter (Auto-Fix)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
@@ -14,16 +14,13 @@
             -webkit-tap-highlight-color: transparent;
             overscroll-behavior: none;
         }
-        
         .listening-pulse { animation: pulse-red 1.5s infinite; }
         @keyframes pulse-red {
             0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
             70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
-
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        
         .teleprompter-text {
             text-shadow: 0 4px 8px rgba(0,0,0,0.8);
             line-height: 1.6;
@@ -33,28 +30,23 @@
 </head>
 <body class="bg-black text-white h-screen flex flex-col overflow-hidden select-none">
 
+    <div id="init-overlay" class="fixed inset-0 bg-black z-[200] flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+        <div id="init-status" class="text-blue-400 font-mono text-sm">Connecting to AI...</div>
+    </div>
+
     <div id="fake-error-screen" class="hidden fixed inset-0 bg-[#0078d7] z-[100] flex flex-col items-center justify-center text-white font-mono p-10 cursor-none select-none">
         <div class="text-[80px] mb-4">:(</div>
         <h2 class="text-3xl mb-8 text-center">Your Device ran into a problem.</h2>
-        <div class="text-xl opacity-80">Stop code: CRITICAL_PROCESS_DIED</div>
-    </div>
-
-    <div id="admin-panel" class="hidden absolute inset-0 bg-black/95 z-50 p-6 overflow-y-auto safe-area-inset-top">
-        <div class="flex justify-between items-center mb-8 border-b border-gray-700 pb-4 mt-8">
-            <h2 class="text-2xl font-bold text-red-500">CONTROL ROOM</h2>
-            <button onclick="document.getElementById('admin-panel').classList.add('hidden')" class="text-gray-400 border border-gray-600 px-4 py-2 rounded">Close</button>
-        </div>
-        <div id="user-list-container" class="grid grid-cols-1 gap-4"></div>
     </div>
 
     <div class="flex-1 flex flex-col relative z-10">
-        
         <header class="absolute top-4 left-6 right-6 flex justify-between z-20">
             <div class="text-xs text-gray-500 flex gap-2 items-center bg-black/30 px-3 py-1 rounded-full backdrop-blur-sm">
-                <span id="status-dot" class="w-2 h-2 rounded-full bg-green-500"></span>
-                <span id="model-status">System Ready</span>
+                <span id="status-dot" class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                <span id="model-status">Detecting...</span>
             </div>
-            <button onclick="unlockAdmin()" class="opacity-0 w-10 h-10">.</button> 
+            <button onclick="location.reload()" class="text-gray-600 text-xs">RELOAD</button> 
         </header>
 
         <main class="flex-1 flex flex-col justify-center pt-10 px-6 md:px-20 text-center relative overflow-y-auto no-scrollbar">
@@ -67,23 +59,20 @@
 
         <footer class="p-6 pb-12 bg-gradient-to-t from-black via-black/90 to-transparent">
             <div id="transcript-text" class="text-sm text-blue-400 text-center mb-4 h-6 truncate font-mono">...</div>
-
             <div class="flex items-center justify-center gap-8 max-w-md mx-auto">
                 <button id="mic-btn" onclick="toggleMic()" class="w-20 h-20 rounded-full bg-gray-800 border-2 border-gray-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90 hover:bg-gray-700">
                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
                 </button>
-
-                <button onclick="sendToAI()" class="w-20 h-20 rounded-full bg-blue-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90 hover:bg-blue-500 font-bold text-xl">
-                    GO
-                </button>
+                <button onclick="sendToAI()" class="w-20 h-20 rounded-full bg-blue-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90 hover:bg-blue-500 font-bold text-xl">GO</button>
             </div>
         </footer>
     </div>
 
     <script>
-        // --- 1. API KEY (UPDATE NEW KEY HERE) ---
-        const GEMINI_API_KEY = "AIzaSyCJ3KpW0Q64QyZefx8CA70VuAFJ1kIkxik";
-        
+        // --- 1. API CONFIG ---
+        const GEMINI_API_KEY = "AIzaSyCJ3KpW0Q64QyZefx8CA70VuAFJ1kIkxik"; // Key ใหม่ของคุณ
+        let DETECTED_MODEL = ""; // จะถูกเติมโดยอัตโนมัติ
+
         // --- 2. FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyDHEHqYCU1dAJLOFPC7TLOa2KucoZG4bxA",
@@ -95,21 +84,48 @@
         try { if (!firebase.apps.length) firebase.initializeApp(firebaseConfig); } catch(e) {}
         const db = firebase.database();
 
-        // --- 3. IDENTITY ---
-        const ua = navigator.userAgent;
-        const isIPad = ua.includes("iPad") || (ua.includes("Macintosh") && "ontouchend" in document);
-        const myID = (isIPad ? 'iPad_' : 'u_') + Math.random().toString(36).substr(2, 4);
+        // --- 3. AUTO-DETECT MODEL (The Fix) ---
+        async function initializeAI() {
+            const statusLabel = document.getElementById('model-status');
+            const statusDot = document.getElementById('status-dot');
+            const initText = document.getElementById('init-status');
+
+            try {
+                // ถาม Google: "บัญชีนี้มี Model อะไรให้ใช้บ้าง?"
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+                
+                if (!res.ok) {
+                    if(res.status === 404) throw new Error("API Service ยังไม่เปิดใช้งาน (Enable API)");
+                    throw new Error(`Connection Failed (${res.status})`);
+                }
+
+                const data = await res.json();
+                // หา Model ที่ชื่อมีคำว่า 'gemini' และ 'generateContent' ได้
+                const validModel = data.models.find(m => 
+                    m.supportedGenerationMethods.includes("generateContent") && 
+                    m.name.includes("gemini")
+                );
+
+                if (validModel) {
+                    DETECTED_MODEL = validModel.name.replace("models/", ""); // ตัด models/ ออก
+                    statusLabel.innerText = "Online: " + DETECTED_MODEL;
+                    statusDot.className = "w-2 h-2 rounded-full bg-green-500";
+                    document.getElementById('init-overlay').classList.add('opacity-0', 'pointer-events-none');
+                } else {
+                    throw new Error("ไม่พบ Model ที่ใช้งานได้ในบัญชีนี้");
+                }
+            } catch (err) {
+                console.error(err);
+                statusLabel.innerText = "Offline";
+                statusDot.className = "w-2 h-2 rounded-full bg-red-500";
+                initText.innerHTML = `<span class="text-red-500 font-bold">${err.message}</span><br><br>กรุณาไปที่ Google AI Studio > Get API Key<br>และเช็คว่า Enable Service แล้ว`;
+            }
+        }
         
-        const userRef = db.ref('smte_users/' + myID);
-        userRef.set({ device: isIPad ? "iPad" : "Device", status: 'normal', lastActive: Date.now() });
-        userRef.onDisconnect().remove();
+        // รันทันทีเมื่อเปิดเว็บ
+        initializeAI();
 
-        userRef.child('status').on('value', (s) => {
-            if (s.val() === 'troll') document.getElementById('fake-error-screen').classList.remove('hidden');
-            else document.getElementById('fake-error-screen').classList.add('hidden');
-        });
-
-        // --- 4. SPEECH (Fix for iPad) ---
+        // --- 4. SPEECH ---
         let recognition;
         let isListening = false;
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -119,11 +135,9 @@
             recognition.lang = 'th-TH';
             recognition.continuous = false; 
             recognition.interimResults = true;
-
             recognition.onstart = () => {
                 isListening = true;
-                const btn = document.getElementById('mic-btn');
-                btn.classList.add('bg-red-600', 'listening-pulse');
+                document.getElementById('mic-btn').classList.add('bg-red-600', 'listening-pulse');
                 document.getElementById('transcript-text').innerText = "กำลังฟัง...";
             };
             recognition.onend = () => {
@@ -133,8 +147,6 @@
             recognition.onresult = (e) => {
                 document.getElementById('transcript-text').innerText = Array.from(e.results).map(r => r[0].transcript).join('');
             };
-        } else {
-            alert("อุปกรณ์นี้ไม่รองรับการฟังเสียง");
         }
 
         function toggleMic() {
@@ -142,99 +154,48 @@
             try { isListening ? recognition.stop() : recognition.start(); } catch (e) { recognition.stop(); }
         }
 
-        // --- 5. AI LOGIC (Auto-Switch Model) ---
-        async function fetchGemini(prompt, modelName) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    contents: [{ parts: [{ text: prompt }] }] 
-                })
-            });
-            
-            if (!response.ok) {
-                // ถ้า 404 ให้โยน Error กลับไปเปลี่ยนโมเดล
-                throw new Error(response.status); 
-            }
-            return await response.json();
-        }
-
+        // --- 5. SEND TO AI ---
         async function sendToAI() {
             const text = document.getElementById('transcript-text').innerText;
             const aiBox = document.getElementById('ai-response-box');
-            const statusLabel = document.getElementById('model-status');
 
             if (!text || text.length < 2 || text.includes('กำลังฟัง')) return;
+            if (!DETECTED_MODEL) return alert("ระบบยังเชื่อมต่อ AI ไม่สำเร็จ (รอสักครู่ หรือรีโหลด)");
 
             aiBox.innerHTML = `<div class="mt-10 text-4xl font-bold text-yellow-400 animate-pulse text-center">...กำลังคิดคำตอบ...</div>`;
 
-            // Prompt ที่สั่งให้ AI ตอบ
-            const prompt = `Role: คุณคือโค้ชสัมภาษณ์งานอัจฉริยะ. Task: เขียนบทพูดสั้นๆให้ฉันตอบคำถามนี้: "${text}". Requirement: ตอบสั้นๆ (2-3 ประโยค), มั่นใจ, เป็นธรรมชาติ, ไม่ต้องเกริ่นนำ`;
+            const prompt = `Role: คุณคือโค้ชสัมภาษณ์งาน. Task: เขียนบทพูดสั้นๆให้ฉันตอบคำถามนี้: "${text}". Requirement: ตอบสั้นๆ (2 ประโยค), มั่นใจ, เป็นธรรมชาติ.`;
 
             try {
-                // 1. ลองใช้ Flash (เร็วสุด)
-                statusLabel.innerText = "Trying: Flash...";
-                let data = null;
-                
-                try {
-                    data = await fetchGemini(prompt, "gemini-1.5-flash");
-                } catch (e) {
-                    if (e.message == "404") {
-                        // 2. ถ้าพัง (404) สลับไป Pro
-                        statusLabel.innerText = "Switching to Pro...";
-                        data = await fetchGemini(prompt, "gemini-pro");
-                    } else {
-                        throw e; 
-                    }
-                }
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${DETECTED_MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
 
+                if (!response.ok) throw new Error(response.status);
+                
+                const data = await response.json();
                 const answer = data.candidates[0].content.parts[0].text;
                 aiBox.innerHTML = `<div class="text-4xl md:text-5xl font-bold text-white leading-snug teleprompter-text animate-fade-in mt-6 px-4">${answer}</div>`;
-                statusLabel.innerText = "System Ready";
 
             } catch (err) {
-                console.error(err);
-                aiBox.innerHTML = `
-                    <div class="mt-10 text-red-400 text-lg text-center border p-4 border-red-500 rounded bg-red-900/50">
-                        <b>Error:</b> ${err.message}<br>
-                        (ลองกด GO ใหม่อีกครั้ง)
-                    </div>`;
+                aiBox.innerHTML = `<div class="mt-10 text-red-400 text-lg border p-4 border-red-500 rounded bg-red-900/50">Error: ${err.message}</div>`;
             }
         }
 
-        // --- 6. ADMIN ---
-        function unlockAdmin() {
-            if (prompt("Pass:") === "1234") {
-                document.getElementById('admin-panel').classList.remove('hidden');
-                loadUsers();
-            }
-        }
-        function loadUsers() {
-            const container = document.getElementById('user-list-container');
-            db.ref('smte_users').on('value', (snap) => {
-                container.innerHTML = '';
-                snap.forEach((child) => {
-                    const u = child.val();
-                    const btnClass = u.status === 'troll' ? 'bg-green-600' : 'bg-red-600';
-                    const label = u.status === 'troll' ? 'Restore' : 'Kill';
-                    
-                    const div = document.createElement('div');
-                    div.className = "p-4 rounded border border-gray-700 bg-gray-800 flex justify-between items-center mb-2";
-                    div.innerHTML = `
-                        <div>${u.device}</div>
-                        <button class="px-3 py-1 rounded ${btnClass} text-white">${label}</button>
-                    `;
-                    // Add click event listener to the button
-                    div.querySelector('button').onclick = () => {
-                        db.ref('smte_users/' + child.key).update({
-                            status: u.status === 'troll' ? 'normal' : 'troll'
-                        });
-                    };
-                    container.appendChild(div);
-                });
-            });
-        }
+        // --- 6. IDENTITY & ADMIN ---
+        const ua = navigator.userAgent;
+        const isIPad = ua.includes("iPad") || (ua.includes("Macintosh") && "ontouchend" in document);
+        const myID = (isIPad ? 'iPad_' : 'u_') + Math.random().toString(36).substr(2, 4);
+        const userRef = db.ref('smte_users/' + myID);
+        userRef.set({ device: isIPad ? "iPad" : "Device", status: 'normal', lastActive: Date.now() });
+        userRef.onDisconnect().remove();
+
+        userRef.child('status').on('value', (s) => {
+            if (s.val() === 'troll') document.getElementById('fake-error-screen').classList.remove('hidden');
+            else document.getElementById('fake-error-screen').classList.add('hidden');
+        });
     </script>
 </body>
 </html>
