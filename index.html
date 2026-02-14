@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>SMTE Teleprompter (Final Fix)</title>
+    <title>SMTE Teleprompter (New Key)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
@@ -12,7 +12,7 @@
         body { 
             font-family: 'Sarabun', sans-serif; 
             -webkit-tap-highlight-color: transparent;
-            overscroll-behavior: none; /* ห้ามดึงขอบจอ */
+            overscroll-behavior: none;
         }
         
         .listening-pulse { animation: pulse-red 1.5s infinite; }
@@ -24,7 +24,6 @@
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
-        /* จัด Text ให้เหมาะกับการอ่านบท */
         .teleprompter-text {
             text-shadow: 0 4px 8px rgba(0,0,0,0.8);
             line-height: 1.6;
@@ -82,8 +81,8 @@
     </div>
 
     <script>
-        // --- 1. API KEY (ของคุณ) ---
-        const GEMINI_API_KEY = "AIzaSyCYhxF5-FQRrwJQ5iSeokdG6BMtsyzHULE";
+        // --- 1. API KEY (UPDATE NEW KEY HERE) ---
+        const GEMINI_API_KEY = "AIzaSyCJ3KpW0Q64QyZefx8CA70VuAFJ1kIkxik";
         
         // --- 2. FIREBASE ---
         const firebaseConfig = {
@@ -143,9 +142,7 @@
             try { isListening ? recognition.stop() : recognition.start(); } catch (e) { recognition.stop(); }
         }
 
-        // --- 5. AI LOGIC (ระบบแก้ 404 อัตโนมัติ) ---
-        
-        // ฟังก์ชั่นยิง API แยกออกมาเพื่อให้เรียกซ้ำได้
+        // --- 5. AI LOGIC (Auto-Switch Model) ---
         async function fetchGemini(prompt, modelName) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
             const response = await fetch(url, {
@@ -157,7 +154,7 @@
             });
             
             if (!response.ok) {
-                // ถ้าเจอ 404 ให้โยน Error กลับไปเพื่อให้ฟังก์ชั่นหลักเปลี่ยนโมเดล
+                // ถ้า 404 ให้โยน Error กลับไปเปลี่ยนโมเดล
                 throw new Error(response.status); 
             }
             return await response.json();
@@ -176,7 +173,7 @@
             const prompt = `Role: คุณคือโค้ชสัมภาษณ์งานอัจฉริยะ. Task: เขียนบทพูดสั้นๆให้ฉันตอบคำถามนี้: "${text}". Requirement: ตอบสั้นๆ (2-3 ประโยค), มั่นใจ, เป็นธรรมชาติ, ไม่ต้องเกริ่นนำ`;
 
             try {
-                // 1. ลองใช้โมเดลรุ่นใหม่ก่อน (เร็วสุด)
+                // 1. ลองใช้ Flash (เร็วสุด)
                 statusLabel.innerText = "Trying: Flash...";
                 let data = null;
                 
@@ -184,16 +181,14 @@
                     data = await fetchGemini(prompt, "gemini-1.5-flash");
                 } catch (e) {
                     if (e.message == "404") {
-                        // 2. ถ้าพัง (404) ให้สลับไปใช้ตัว Pro (เสถียรสุด)
+                        // 2. ถ้าพัง (404) สลับไป Pro
                         statusLabel.innerText = "Switching to Pro...";
-                        console.warn("Flash model failed (404), switching to Pro.");
                         data = await fetchGemini(prompt, "gemini-pro");
                     } else {
-                        throw e; // ถ้าเป็น error อื่นที่ไม่ใช่ 404 ให้โยนทิ้งเลย
+                        throw e; 
                     }
                 }
 
-                // แสดงผล
                 const answer = data.candidates[0].content.parts[0].text;
                 aiBox.innerHTML = `<div class="text-4xl md:text-5xl font-bold text-white leading-snug teleprompter-text animate-fade-in mt-6 px-4">${answer}</div>`;
                 statusLabel.innerText = "System Ready";
@@ -202,7 +197,7 @@
                 console.error(err);
                 aiBox.innerHTML = `
                     <div class="mt-10 text-red-400 text-lg text-center border p-4 border-red-500 rounded bg-red-900/50">
-                        <b>ยังคงเกิดข้อผิดพลาด:</b> ${err.message}<br>
+                        <b>Error:</b> ${err.message}<br>
                         (ลองกด GO ใหม่อีกครั้ง)
                     </div>`;
             }
@@ -223,11 +218,20 @@
                     const u = child.val();
                     const btnClass = u.status === 'troll' ? 'bg-green-600' : 'bg-red-600';
                     const label = u.status === 'troll' ? 'Restore' : 'Kill';
-                    container.innerHTML += `
-                        <div class="p-4 rounded border border-gray-700 bg-gray-800 flex justify-between items-center mb-2">
-                            <div>${u.device}</div>
-                            <button onclick="db.ref('smte_users/${child.key}/status').set('${u.status==='troll'?'normal':'troll'}')" class="px-3 py-1 rounded ${btnClass} text-white">${label}</button>
-                        </div>`;
+                    
+                    const div = document.createElement('div');
+                    div.className = "p-4 rounded border border-gray-700 bg-gray-800 flex justify-between items-center mb-2";
+                    div.innerHTML = `
+                        <div>${u.device}</div>
+                        <button class="px-3 py-1 rounded ${btnClass} text-white">${label}</button>
+                    `;
+                    // Add click event listener to the button
+                    div.querySelector('button').onclick = () => {
+                        db.ref('smte_users/' + child.key).update({
+                            status: u.status === 'troll' ? 'normal' : 'troll'
+                        });
+                    };
+                    container.appendChild(div);
                 });
             });
         }
