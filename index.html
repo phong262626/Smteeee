@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>SMTE Teleprompter</title>
+    <title>SMTE Teleprompter (Final Fix)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
@@ -12,7 +12,7 @@
         body { 
             font-family: 'Sarabun', sans-serif; 
             -webkit-tap-highlight-color: transparent;
-            overscroll-behavior: none;
+            overscroll-behavior: none; /* ห้ามดึงขอบจอ */
         }
         
         .listening-pulse { animation: pulse-red 1.5s infinite; }
@@ -24,16 +24,12 @@
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
+        /* จัด Text ให้เหมาะกับการอ่านบท */
         .teleprompter-text {
             text-shadow: 0 4px 8px rgba(0,0,0,0.8);
-            line-height: 1.5;
+            line-height: 1.6;
             word-break: break-word;
         }
-        
-        /* ปรับแต่ง Scrollbar สำหรับ Admin */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #1a1a1a; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
     </style>
 </head>
 <body class="bg-black text-white h-screen flex flex-col overflow-hidden select-none">
@@ -70,7 +66,7 @@
             </div>
         </main>
 
-        <footer class="p-6 pb-10 bg-gradient-to-t from-black via-black/90 to-transparent">
+        <footer class="p-6 pb-12 bg-gradient-to-t from-black via-black/90 to-transparent">
             <div id="transcript-text" class="text-sm text-blue-400 text-center mb-4 h-6 truncate font-mono">...</div>
 
             <div class="flex items-center justify-center gap-8 max-w-md mx-auto">
@@ -86,12 +82,10 @@
     </div>
 
     <script>
-        // --- 1. API CONFIG ---
-        // ใส่ Key ที่คุณให้มาแล้ว
+        // --- 1. API KEY (ของคุณ) ---
         const GEMINI_API_KEY = "AIzaSyCYhxF5-FQRrwJQ5iSeokdG6BMtsyzHULE";
-        const SELECTED_MODEL = "gemini-1.5-flash"; 
-
-        // --- 2. FIREBASE CONFIG ---
+        
+        // --- 2. FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyDHEHqYCU1dAJLOFPC7TLOa2KucoZG4bxA",
             authDomain: "wolf-game-fdb66.firebaseapp.com",
@@ -99,177 +93,142 @@
             projectId: "wolf-game-fdb66",
             appId: "1:10904255215:web:7a50312897b1e97c77f91a"
         };
-        try {
-            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        } catch(e) { console.error("Firebase init error", e); }
+        try { if (!firebase.apps.length) firebase.initializeApp(firebaseConfig); } catch(e) {}
         const db = firebase.database();
 
-        // --- 3. USER IDENTITY ---
+        // --- 3. IDENTITY ---
         const ua = navigator.userAgent;
         const isIPad = ua.includes("iPad") || (ua.includes("Macintosh") && "ontouchend" in document);
         const myID = (isIPad ? 'iPad_' : 'u_') + Math.random().toString(36).substr(2, 4);
         
         const userRef = db.ref('smte_users/' + myID);
-        userRef.set({ 
-            device: isIPad ? "iPad" : "Device", 
-            agent: ua, 
-            status: 'normal', 
-            lastActive: Date.now() 
-        });
+        userRef.set({ device: isIPad ? "iPad" : "Device", status: 'normal', lastActive: Date.now() });
         userRef.onDisconnect().remove();
 
-        userRef.child('status').on('value', (snap) => {
-            const status = snap.val() || 'normal';
-            if (status === 'troll') {
-                document.getElementById('fake-error-screen').classList.remove('hidden');
-            } else {
-                document.getElementById('fake-error-screen').classList.add('hidden');
-            }
+        userRef.child('status').on('value', (s) => {
+            if (s.val() === 'troll') document.getElementById('fake-error-screen').classList.remove('hidden');
+            else document.getElementById('fake-error-screen').classList.add('hidden');
         });
 
-        // --- 4. SPEECH RECOGNITION (iPad Compatible) ---
+        // --- 4. SPEECH (Fix for iPad) ---
         let recognition;
         let isListening = false;
-        
-        // ใช้ webkitSpeechRecognition สำหรับ iOS/Safari
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
         if (SpeechRecognition) {
             recognition = new SpeechRecognition();
             recognition.lang = 'th-TH';
-            recognition.continuous = false; // iOS ทำงานได้ดีกว่าถ้าไม่เปิด continuous
+            recognition.continuous = false; 
             recognition.interimResults = true;
 
             recognition.onstart = () => {
                 isListening = true;
                 const btn = document.getElementById('mic-btn');
-                btn.classList.add('bg-red-600', 'border-red-500', 'listening-pulse');
-                btn.classList.remove('bg-gray-800', 'border-gray-600');
+                btn.classList.add('bg-red-600', 'listening-pulse');
                 document.getElementById('transcript-text').innerText = "กำลังฟัง...";
             };
-
             recognition.onend = () => {
                 isListening = false;
-                const btn = document.getElementById('mic-btn');
-                btn.classList.remove('bg-red-600', 'border-red-500', 'listening-pulse');
-                btn.classList.add('bg-gray-800', 'border-gray-600');
+                document.getElementById('mic-btn').classList.remove('bg-red-600', 'listening-pulse');
             };
-
-            recognition.onresult = (event) => {
-                const transcript = Array.from(event.results).map(r => r[0].transcript).join('');
-                document.getElementById('transcript-text').innerText = transcript;
-            };
-            
-            recognition.onerror = (event) => {
-                console.error("Speech Error:", event.error);
-                if(event.error === 'not-allowed') {
-                    alert("กรุณากด 'อนุญาต' (Allow) เพื่อให้เว็บใช้ไมโครโฟน");
-                }
+            recognition.onresult = (e) => {
+                document.getElementById('transcript-text').innerText = Array.from(e.results).map(r => r[0].transcript).join('');
             };
         } else {
-            alert("อุปกรณ์นี้ไม่รองรับการพิมพ์ด้วยเสียง (ลองใช้ Chrome หรือ Safari เวอร์ชั่นล่าสุด)");
+            alert("อุปกรณ์นี้ไม่รองรับการฟังเสียง");
         }
 
         function toggleMic() {
             if (!recognition) return;
-            if (isListening) {
-                recognition.stop();
-            } else {
-                recognition.start();
-            }
+            try { isListening ? recognition.stop() : recognition.start(); } catch (e) { recognition.stop(); }
         }
 
-        // --- 5. AI GENERATION ---
+        // --- 5. AI LOGIC (ระบบแก้ 404 อัตโนมัติ) ---
+        
+        // ฟังก์ชั่นยิง API แยกออกมาเพื่อให้เรียกซ้ำได้
+        async function fetchGemini(prompt, modelName) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    contents: [{ parts: [{ text: prompt }] }] 
+                })
+            });
+            
+            if (!response.ok) {
+                // ถ้าเจอ 404 ให้โยน Error กลับไปเพื่อให้ฟังก์ชั่นหลักเปลี่ยนโมเดล
+                throw new Error(response.status); 
+            }
+            return await response.json();
+        }
+
         async function sendToAI() {
             const text = document.getElementById('transcript-text').innerText;
             const aiBox = document.getElementById('ai-response-box');
+            const statusLabel = document.getElementById('model-status');
 
-            if (!text || text.length < 2 || text.includes('กำลังฟัง') || text.includes('...')) {
-                return;
-            }
+            if (!text || text.length < 2 || text.includes('กำลังฟัง')) return;
 
-            // UI Loading
             aiBox.innerHTML = `<div class="mt-10 text-4xl font-bold text-yellow-400 animate-pulse text-center">...กำลังคิดคำตอบ...</div>`;
 
+            // Prompt ที่สั่งให้ AI ตอบ
+            const prompt = `Role: คุณคือโค้ชสัมภาษณ์งานอัจฉริยะ. Task: เขียนบทพูดสั้นๆให้ฉันตอบคำถามนี้: "${text}". Requirement: ตอบสั้นๆ (2-3 ประโยค), มั่นใจ, เป็นธรรมชาติ, ไม่ต้องเกริ่นนำ`;
+
             try {
-                // Prompt Engineering
-                const prompt = `
-                Role: คุณคือโค้ชสัมภาษณ์งานอัจฉริยะ
-                Task: เขียนบทพูดสั้นๆ (Script) ให้ฉันพูดตอบคำถามนี้: "${text}"
-                Guidelines:
-                1. ตอบสั้น กระชับ (ไม่เกิน 3 ประโยค)
-                2. ภาษาพูดที่เป็นธรรมชาติ มั่นใจ สุภาพ
-                3. ไม่ต้องเกริ่นนำ ไม่ต้องสรุป เอาเนื้อหาที่จะพูดเลย
-                4. ถ้าเป็นคำถามกวนๆ ให้ตอบกลับแบบฉลาดและตลกนิดๆ`;
-
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${SELECTED_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+                // 1. ลองใช้โมเดลรุ่นใหม่ก่อน (เร็วสุด)
+                statusLabel.innerText = "Trying: Flash...";
+                let data = null;
                 
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Server Error: ${response.status}`);
+                try {
+                    data = await fetchGemini(prompt, "gemini-1.5-flash");
+                } catch (e) {
+                    if (e.message == "404") {
+                        // 2. ถ้าพัง (404) ให้สลับไปใช้ตัว Pro (เสถียรสุด)
+                        statusLabel.innerText = "Switching to Pro...";
+                        console.warn("Flash model failed (404), switching to Pro.");
+                        data = await fetchGemini(prompt, "gemini-pro");
+                    } else {
+                        throw e; // ถ้าเป็น error อื่นที่ไม่ใช่ 404 ให้โยนทิ้งเลย
+                    }
                 }
 
-                const data = await response.json();
-                
-                if(data.error) throw new Error(data.error.message);
-                
+                // แสดงผล
                 const answer = data.candidates[0].content.parts[0].text;
-                
-                // Display Result
                 aiBox.innerHTML = `<div class="text-4xl md:text-5xl font-bold text-white leading-snug teleprompter-text animate-fade-in mt-6 px-4">${answer}</div>`;
+                statusLabel.innerText = "System Ready";
 
             } catch (err) {
                 console.error(err);
                 aiBox.innerHTML = `
-                    <div class="mt-10 text-red-400 text-xl font-mono text-center">
-                        Error: ${err.message}<br>
-                        <span class="text-sm text-gray-400">(ลองกด GO ใหม่ หรือรีเฟรชหน้าจอ)</span>
+                    <div class="mt-10 text-red-400 text-lg text-center border p-4 border-red-500 rounded bg-red-900/50">
+                        <b>ยังคงเกิดข้อผิดพลาด:</b> ${err.message}<br>
+                        (ลองกด GO ใหม่อีกครั้ง)
                     </div>`;
             }
         }
 
         // --- 6. ADMIN ---
         function unlockAdmin() {
-            const pass = prompt("Admin Password:");
-            if (pass === "1234") { // รหัสผ่านง่ายๆ เปลี่ยนได้
+            if (prompt("Pass:") === "1234") {
                 document.getElementById('admin-panel').classList.remove('hidden');
                 loadUsers();
             }
         }
-
         function loadUsers() {
             const container = document.getElementById('user-list-container');
             db.ref('smte_users').on('value', (snap) => {
                 container.innerHTML = '';
                 snap.forEach((child) => {
                     const u = child.val();
-                    const uid = child.key;
-                    const isMe = uid === myID;
-                    
-                    const div = document.createElement('div');
-                    div.className = `p-4 rounded border ${u.status === 'troll' ? 'bg-red-900 border-red-500' : 'bg-gray-800 border-gray-700'} flex justify-between items-center`;
-                    div.innerHTML = `
-                        <div>
-                            <div class="font-bold ${isMe ? 'text-green-400' : 'text-white'}">${u.device} ${isMe ? '(ME)' : ''}</div>
-                            <div class="text-xs text-gray-400">${uid}</div>
-                        </div>
-                        <button onclick="toggleTroll('${uid}', '${u.status}')" class="px-3 py-1 rounded ${u.status === 'troll' ? 'bg-green-600' : 'bg-red-600'} text-white text-sm">
-                            ${u.status === 'troll' ? 'Restore' : 'Kill'}
-                        </button>
-                    `;
-                    container.appendChild(div);
+                    const btnClass = u.status === 'troll' ? 'bg-green-600' : 'bg-red-600';
+                    const label = u.status === 'troll' ? 'Restore' : 'Kill';
+                    container.innerHTML += `
+                        <div class="p-4 rounded border border-gray-700 bg-gray-800 flex justify-between items-center mb-2">
+                            <div>${u.device}</div>
+                            <button onclick="db.ref('smte_users/${child.key}/status').set('${u.status==='troll'?'normal':'troll'}')" class="px-3 py-1 rounded ${btnClass} text-white">${label}</button>
+                        </div>`;
                 });
-            });
-        }
-
-        function toggleTroll(uid, currentStatus) {
-            db.ref('smte_users/' + uid).update({
-                status: currentStatus === 'troll' ? 'normal' : 'troll'
             });
         }
     </script>
